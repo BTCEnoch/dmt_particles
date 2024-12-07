@@ -1,8 +1,8 @@
 .container {
   width: 100vw;
   height: 100vh;
-  background-color: black; /* Black background for the scene */
   position: relative;
+  background-color: black; /* Black for visibility */
 }
 
   
