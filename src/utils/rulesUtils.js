@@ -1,5 +1,7 @@
+import { mulberry32 } from './randomUtils';
+
 export function generateRules(colors, seed) {
-    const rand = mulberry32(seed);
+    const rand = mulberry32(seed); // Ensure `mulberry32` is imported
     const rules = {};
     colors.forEach((color) => {
         rules[color] = {};

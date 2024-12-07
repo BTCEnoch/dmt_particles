@@ -1,142 +1,99 @@
 import React, { useEffect, useRef } from 'react';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls';
-import '../styles/ThreeScene.module.css'; // Ensure the CSS file exists
+import { generateColorsFromNonce } from '../utils/randomUtils';
+import { generateRules, flattenRules, applyForces } from '../utils/rulesUtils';
 
-const ThreeScene = ({ settings, blockData, debug = true }) => {
-  const containerRef = useRef(null);
-  const sceneRef = useRef(null);
-  const cameraRef = useRef(null);
-  const rendererRef = useRef(null);
-  const particlesGroupRef = useRef(null); // To dynamically update particles
+const ThreeScene = ({ settings, blockData }) => {
+    const containerRef = useRef(null);
 
-  // Create and initialize the Three.js scene
-  useEffect(() => {
-    console.log('Initializing Three.js scene...');
-  
-    const container = containerRef.current;
-    if (!container) {
-      console.error('Container ref is null.');
-      return;
-    }
-  
-    // Check if container has valid dimensions
-    const width = container.clientWidth;
-    const height = container.clientHeight;
-    console.log('Container dimensions:', width, height);
-  
-    if (width === 0 || height === 0) {
-      console.error('Container dimensions are invalid. Check parent styles or layout.');
-      return;
-    }
-
-    // Initialize Scene, Camera, and Renderer
-    const scene = new THREE.Scene();
-    sceneRef.current = scene;
-
-    const camera = new THREE.PerspectiveCamera(
-      75,
-      container.clientWidth / container.clientHeight,
-      0.1,
-      1000
-    );
-    camera.position.set(0, 0, 800);
-    camera.lookAt(0, 0, 0);
-    cameraRef.current = camera;
-
-    const renderer = new THREE.WebGLRenderer({ antialias: true });
-    renderer.setSize(container.clientWidth, container.clientHeight);
-    container.appendChild(renderer.domElement); // Attaches the canvas
-    rendererRef.current = renderer;
-
-    console.log('Renderer DOM Element:', renderer.domElement);
-
-    // Handle resize
-    const handleResize = () => {
-      const width = container.clientWidth;
-      const height = container.clientHeight;
-      console.log('Resizing canvas to:', width, height); // Debug dimensions
-      camera.aspect = width / height;
-      camera.updateProjectionMatrix();
-      renderer.setSize(width, height);
+    const createParticles = (numParticles, dimensions, scene, colors) => {
+        const particlesGroup = new THREE.Group();
+        colors.forEach((color, index) => {
+            for (let i = 0; i < numParticles / colors.length; i++) {
+                const particle = new THREE.Mesh(
+                    new THREE.SphereGeometry(2),
+                    new THREE.MeshBasicMaterial({ color: new THREE.Color(color) })
+                );
+                particle.position.set(
+                    Math.random() * dimensions - dimensions / 2,
+                    Math.random() * dimensions - dimensions / 2,
+                    Math.random() * dimensions - dimensions / 2
+                );
+                particle.userData = {
+                    vx: Math.random() * 2 - 1,
+                    vy: Math.random() * 2 - 1,
+                    vz: Math.random() * 2 - 1,
+                    colorIndex: index,
+                };
+                particlesGroup.add(particle);
+            }
+        });
+        scene.add(particlesGroup);
+        return particlesGroup;
     };
-    
-    window.addEventListener('resize', handleResize);
 
-    const controls = new OrbitControls(camera, renderer.domElement);
-    controls.target.set(0, 0, 0);
-    controls.update();
+    const updateParticles = (particlesGroup, dimensions, rulesArray) => {
+        const particles = particlesGroup.children;
 
-    // Add Lighting
-    const ambientLight = new THREE.AmbientLight(0x404040); // Soft white light
-    scene.add(ambientLight);
+        applyForces(particles, rulesArray, dimensions, 0.1, 0.05);
+        particles.forEach((particle) => {
+            particle.position.x += particle.userData.vx;
+            particle.position.y += particle.userData.vy;
+            particle.position.z += particle.userData.vz;
 
-    const directionalLight = new THREE.DirectionalLight(0xffffff, 1);
-    directionalLight.position.set(1, 1, 1).normalize();
-    scene.add(directionalLight);
-
-    // Test Cube
-    const geometry = new THREE.BoxGeometry(50, 50, 50);
-    const material = new THREE.MeshBasicMaterial({ color: 0x00ff00 });
-    const cube = new THREE.Mesh(geometry, material);
-    scene.add(cube);
-    
-    // Rotate the cube in the animation loop
-    const animate = () => {
-      cube.rotation.x += 0.01;
-      cube.rotation.y += 0.01;
-      renderer.render(scene, camera);
-      requestAnimationFrame(animate);
+            if (Math.abs(particle.position.x) > dimensions / 2) particle.userData.vx *= -1;
+            if (Math.abs(particle.position.y) > dimensions / 2) particle.userData.vy *= -1;
+            if (Math.abs(particle.position.z) > dimensions / 2) particle.userData.vz *= -1;
+        });
     };
-    animate();
 
-    return () => {
-      console.log('Cleaning up Three.js scene...');
-      window.removeEventListener('resize', handleResize);
-      renderer.dispose();
-      if (container.contains(renderer.domElement)) {
-        container.removeChild(renderer.domElement);
-      }
-    };
-  }, [debug]);
+    useEffect(() => {
+        const container = containerRef.current;
+        const dimensions = settings.dimensions;
 
-  // Update scene when block data changes
-  useEffect(() => {
-    if (blockData) {
-      if (debug) console.log('Block data updated:', blockData);
-
-      const { nonce } = blockData;
-      const colors = Array.from({ length: settings.numParticles }, (_, i) =>
-        `hsl(${(nonce + i * 50) % 360}, 50%, 50%)`
-      );
-
-      // Remove previous particles group if it exists
-      if (particlesGroupRef.current) {
-        sceneRef.current.remove(particlesGroupRef.current);
-      }
-
-      // Create a new particle group
-      const particlesGroup = new THREE.Group();
-      colors.forEach((color, index) => {
-        const particle = new THREE.Mesh(
-          new THREE.SphereGeometry(5),
-          new THREE.MeshBasicMaterial({ color })
+        const scene = new THREE.Scene();
+        const camera = new THREE.PerspectiveCamera(
+            75,
+            container.clientWidth / container.clientHeight,
+            0.1,
+            2000
         );
-        particle.position.set(
-          Math.random() * settings.dimensions - settings.dimensions / 2,
-          Math.random() * settings.dimensions - settings.dimensions / 2,
-          Math.random() * settings.dimensions - settings.dimensions / 2
-        );
-        particlesGroup.add(particle);
-      });
+        camera.position.set(500, 500, 500);
+        camera.lookAt(0, 0, 0);
 
-      sceneRef.current.add(particlesGroup);
-      particlesGroupRef.current = particlesGroup;
-    }
-  }, [blockData, settings, debug]);
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(container.clientWidth, container.clientHeight);
+        container.appendChild(renderer.domElement);
 
-  return <div ref={containerRef} className="container" />
+        const controls = new OrbitControls(camera, renderer.domElement);
+        controls.target.set(0, 0, 0);
+        controls.update();
 
+        const colors = generateColorsFromNonce(blockData?.nonce || 0, 5);
+        const rules = generateRules(colors, blockData?.nonce || 0);
+        const rulesArray = flattenRules(rules, colors);
+
+        const particlesGroup = createParticles(settings.numParticles, dimensions, scene, colors);
+
+        const animate = () => {
+            updateParticles(particlesGroup, dimensions, rulesArray);
+            controls.update();
+            renderer.render(scene, camera);
+            requestAnimationFrame(animate);
+        };
+
+        animate();
+
+        return () => {
+            renderer.dispose();
+            if (container.contains(renderer.domElement)) {
+                container.removeChild(renderer.domElement);
+            }
+        };
+    }, [settings, blockData]);
+
+    return <div ref={containerRef} style={{ width: '100%', height: '100%' }} />;
 };
 
 export default ThreeScene;
