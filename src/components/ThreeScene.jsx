@@ -12,14 +12,23 @@ const ThreeScene = ({ settings, blockData, debug = true }) => {
 
   // Create and initialize the Three.js scene
   useEffect(() => {
-    if (debug) console.log('Initializing Three.js scene...');
+    console.log('Initializing Three.js scene...');
+  
     const container = containerRef.current;
-
     if (!container) {
       console.error('Container ref is null.');
       return;
     }
-    console.log('Container dimensions:', container.clientWidth, container.clientHeight);
+  
+    // Check if container has valid dimensions
+    const width = container.clientWidth;
+    const height = container.clientHeight;
+    console.log('Container dimensions:', width, height);
+  
+    if (width === 0 || height === 0) {
+      console.error('Container dimensions are invalid. Check parent styles or layout.');
+      return;
+    }
 
     // Initialize Scene, Camera, and Renderer
     const scene = new THREE.Scene();
