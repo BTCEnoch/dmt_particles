@@ -18,6 +18,10 @@ const ThreeScene = ({ settings, blockData }) => {
       return;
     }
 
+    if (debug) {
+      console.log('ThreeScene component has mounted');
+    }
+
     console.log('Initializing Three.js scene...');
 
     // Initialize scene
@@ -31,22 +35,24 @@ const ThreeScene = ({ settings, blockData }) => {
       0.1,
       1000
     );
-    camera.position.z = 5; // Set the camera position
-    cameraRef.current = camera;
+    camera.position.set(0, 0, 5); // Adjust to view the cube
+    camera.lookAt(0, 0, 0);
 
     // Initialize renderer
     const renderer = new THREE.WebGLRenderer({ antialias: true });
     renderer.setSize(container.clientWidth, container.clientHeight);
-    renderer.setClearColor(0x000000); // Set background color to black
+    renderer.setClearColor(0x000000); // Black background
+    console.log('Appending renderer DOM element...');
     container.appendChild(renderer.domElement);
-    rendererRef.current = renderer;
 
     // Add test geometry (a simple cube)
     const geometry = new THREE.BoxGeometry();
     const material = new THREE.MeshBasicMaterial({ color: 0x00ff00 });
     const cube = new THREE.Mesh(geometry, material);
+    cube.position.set(0, 0, 0); // Centered in the scene
     scene.add(cube);
-    cubeRef.current = cube;
+
+    console.log('Test cube added to scene:', cube);
 
     // Add orbit controls
     const controls = new OrbitControls(camera, renderer.domElement);
@@ -67,15 +73,18 @@ const ThreeScene = ({ settings, blockData }) => {
 
     // Animation loop
     const animate = () => {
-      if (cubeRef.current) {
-        cubeRef.current.rotation.x += 0.01;
-        cubeRef.current.rotation.y += 0.01;
-      }
-      controls.update();
       renderer.render(scene, camera);
+      console.log('Frame rendered');
       requestAnimationFrame(animate);
     };
     animate();
+
+    renderer.setPixelRatio(window.devicePixelRatio);
+    window.addEventListener('resize', () => {
+      camera.aspect = container.clientWidth / container.clientHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(container.clientWidth, container.clientHeight);
+    });
 
     // Cleanup on unmount
     return () => {
