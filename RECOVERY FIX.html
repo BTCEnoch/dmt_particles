@@ -1,0 +1,839 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <style>
+        body {
+            margin: 0;
+        }
+
+        #input {
+            display: none;
+            position: absolute;
+            font-size: 20px;
+            margin: 20px;
+            top: 0;
+            left: 50%;
+        }
+    </style>
+</head>
+<body>
+    <input id="input" type="number" placeholder="Enter block number" />
+    <script id="preview" mint="MINT_INSCRIPTION_ID"></script>
+    <script type="module">
+        import GUI from 'https://cdn.jsdelivr.net/npm/lil-gui@0.17/+esm';
+        import * as THREE from 'https://cdn.skypack.dev/three@0.144.0';
+        import { OrbitControls } from 'https://cdn.skypack.dev/three@0.132.2/examples/jsm/controls/OrbitControls.js';
+
+        const colorBank = [
+            '#96ceb4', '#ffeead', '#ff6f69', '#ffcc5c', '#88d8b0',
+            '#ff71ce', '#01cdfe', '#05ffa1', '#b967ff', '#fffb96',
+            '#ff4e50', '#fc913a', '#f9d62e', '#eae374', '#e2f4c7',
+            '#eeaf61', '#fb9062', '#ee5d6c', '#ce4993', '#6a0d83',
+            '#ff00c1', '#9600ff', '#4900ff', '#00b8ff', '#00fff9',
+            '#adff00', '#74d600', '#028900', '#00d27f', '#00ff83',
+            '#8000ff', '#0000ff', '#00ff00', '#ffff00', '#ff0000',
+            '#ff1685', '#b916ff', '#9216ff', '#ff7c27', '#ffe736',
+            '#7666f3', '#a367f0', '#b968ef', '#d069ee', '#e76aed',
+            '#f8bbd0', '#f06292', '#e91e62', '#c2185c', '#880e4f',
+            '#ffef00', '#ffdb00', '#ffc700', '#ffbf00', '#ffab00',
+            '#00ffff', '#00dddd', '#00cccc', '#00bbbb', '#00aaaa',
+            '#989fff', '#b38dff', '#d284ff', '#f076ff', '#ff70eb'
+        ];
+
+        let blockNumber = 0; // Initialize blockNumber
+        let mintText = document.getElementById('preview').getAttribute('mint');
+        let atoms = [];
+        let blockInfo = {};
+        let result = {};
+        let parsedData = null;
+        let sceneInitialized = false;
+        let explorationStarted = false;
+
+        const urlSearchParams = new URLSearchParams(window.location.search);
+        const params = Object.fromEntries(urlSearchParams.entries());
+
+        // Settings object
+        const settings = {
+            seed: 91651088029,
+            nonce: 0,
+            blockNumber: 0,
+            fps: 0,
+            dimensions: 400,
+            atoms: {
+                count: 250, // Per Color
+                radius: 1
+            },
+            rules: {},
+            rulesArray: [],
+            colors: [],
+            shapes: [],
+            time_scale: 0.80,
+            cutOff: 9050 * 2,
+            viscosity: 1.0,
+            collisionRadius: 0.01,
+            oscillationSpeed: 0.00001,
+            oscillationAmplitude: 0.05,
+            oscillationFrequency: 0.01,
+            pulseDuration: 100,
+            reset: resetScene,
+            assignForce: () => {
+                assignForce();
+                randomAtoms(settings.atoms.count, true);
+                setupGUI(parsedData);
+            },
+            gui: null,
+            scene: {
+                camera: null,
+                scene: null,
+                renderer: null,
+                controls: null,
+                atomsGroup: null,
+                gridHelper: null
+            },
+            specialEffects: {}
+        };
+
+        class Particle {
+            constructor(x, y, z, vx, vy, vz) {
+                this.x = x;
+                this.y = y;
+                this.z = z;
+                this.vx = vx;
+                this.vy = vy;
+                this.vz = vz;
+            }
+
+            update() {
+                this.x += this.vx;
+                this.y += this.vy;
+                this.z += this.vz;
+            }
+
+            applyForce(fx, fy, fz) {
+                this.vx += fx;
+                this.vy += fy;
+                this.vz += fz;
+            }
+        }
+
+        // Geometry definitions
+        const geometries = [
+            new THREE.SphereGeometry(settings.atoms.radius),
+            new THREE.BoxGeometry(settings.atoms.radius, settings.atoms.radius, settings.atoms.radius),
+            new THREE.ConeGeometry(settings.atoms.radius, settings.atoms.radius * 2, 32),
+            new THREE.CylinderGeometry(settings.atoms.radius, settings.atoms.radius, settings.atoms.radius * 2, 32),
+            new THREE.DodecahedronGeometry(settings.atoms.radius),
+            new THREE.IcosahedronGeometry(settings.atoms.radius),
+            new THREE.TorusGeometry(settings.atoms.radius, settings.atoms.radius / 2, 16, 100)
+        ];
+
+        // Functions
+        function switchBlock(newBlockNumber) {
+            blockNumber = newBlockNumber;
+            updateNonceAndRules(blockNumber);
+            fetchBlockData(blockNumber);
+        }
+
+        function resetScene() {
+            randomAtoms(settings.atoms.count, true);
+            settings.scene.controls.target = new THREE.Vector3(
+                settings.dimensions / 2,
+                settings.dimensions / 2,
+                settings.dimensions / 2
+            );
+            addGridHelper();
+        }
+
+        function create(number, color, shapeType, radius, meshMaterials, clusterCenter) {
+            const shapeTypes = ['sphere', 'box', 'cone', 'cylinder', 'dodecahedron', 'icosahedron', 'torus'];
+            const index = shapeTypes.indexOf(shapeType);
+            const geometry = index !== -1 ? geometries[index] : new THREE.SphereGeometry(radius, 32, 32);
+
+            for (let i = 0; i < number; i++) {
+                const material = meshMaterials[color];
+                const mesh = new THREE.Mesh(geometry, material);
+
+                // Random initial positions
+                const position = {
+                    x: Math.random() * settings.dimensions - settings.dimensions / 2,
+                    y: Math.random() * settings.dimensions - settings.dimensions / 2,
+                    z: Math.random() * settings.dimensions - settings.dimensions / 2
+                };
+
+                position.x += settings.dimensions / 2;
+                position.y += settings.dimensions / 2;
+                position.z += settings.dimensions / 2;
+
+                const atom = [position.x, position.y, position.z, 0, 0, 0, color];
+                mesh.position.set(atom[0], atom[1], atom[2]);
+                mesh.scale.set(settings.atoms.radius, settings.atoms.radius, settings.atoms.radius);
+                settings.scene.atomsGroup.add(mesh);
+                atom.push(mesh);
+                atoms.push(atom);
+            }
+        }
+
+        function generateRandomProportions(nonce, numColors) {
+            const random = mulberry32(nonce);
+            const proportions = [];
+            let totalProportion = 0;
+
+            for (let i = 0; i < numColors; i++) {
+                const proportion = random();
+                proportions.push(proportion);
+                totalProportion += proportion;
+            }
+
+            return proportions.map(p => p / totalProportion);
+        }
+
+        function distributeAtoms(nonce, totalAtoms, numColors) {
+            const proportions = generateRandomProportions(nonce, numColors);
+            const atomCounts = proportions.map(p => Math.round(p * totalAtoms));
+
+            const totalAssigned = atomCounts.reduce((sum, count) => sum + count, 0);
+            atomCounts[atomCounts.length - 1] += totalAtoms - totalAssigned;
+            return atomCounts;
+        }
+
+        function getRandomShapeType() {
+            const shapeTypes = ['sphere', 'box', 'cone', 'cylinder', 'dodecahedron', 'icosahedron', 'torus'];
+            return shapeTypes[Math.floor(Math.random() * shapeTypes.length)];
+        }
+
+        function assignRandomShapesToColors(colors) {
+            const colorShapeMapping = {};
+            colors.forEach(color => {
+                colorShapeMapping[color] = getRandomShapeType();
+            });
+            return colorShapeMapping;
+        }
+
+        function brightenColor(color, factor) {
+            const colorObj = new THREE.Color(color);
+            colorObj.multiplyScalar(factor);
+            return `#${colorObj.getHexString()}`;
+        }
+
+        function generateColorsFromNonce(nonce, numColors) {
+            const colors = [];
+            const random = mulberry32(nonce);
+            for (let i = 0; i < numColors; i++) {
+                const index = Math.floor(random() * colorBank.length);
+                let color = colorBank[index];
+                color = brightenColor(color, 1.2);
+                colors.push(color);
+            }
+            console.log('Generated colors:', colors);
+            return colors;
+        }
+
+        function shiftNonceLeft(nonce) {
+            if (!nonce || typeof nonce.toString !== 'function') {
+                console.error('Invalid nonce:', nonce);
+                return nonce;
+            }
+            const nonceStr = nonce.toString();
+            return parseInt(nonceStr.slice(1) + nonceStr[0], 10);
+        }
+
+        function generateShapesFromNonce(nonce, numShapes) {
+            const random = mulberry32(nonce);
+            const shapes = ['sphere', 'cube', 'tetrahedron']; // Example shapes
+            const result = [];
+            for (let i = 0; i < numShapes; i++) {
+                result.push(shapes[Math.floor(random() * shapes.length)]);
+            }
+            return result;
+        }
+
+        function applySpecialEffects(nonce) {
+            const nonceStr = nonce.toString();
+            if (nonceStr.includes('420')) {
+                settings.specialEffects.glow = true;
+            } else {
+                settings.specialEffects.glow = false;
+            }
+        }
+
+        function addLights() {
+            const ambientLight = new THREE.AmbientLight(0x404040);
+            settings.scene.scene.add(ambientLight);
+
+            const directionalLight = new THREE.DirectionalLight(0xffffff, 1);
+            directionalLight.position.set(1, 1, 1).normalize();
+            settings.scene.scene.add(directionalLight);
+        }
+
+        function countNearbyParticles(center, range) {
+            let count = 0;
+            atoms.forEach(atom => {
+                const distance = Math.sqrt(
+                    Math.pow(atom[0] - center.x, 2) +
+                    Math.pow(atom[1] - center.y, 2) +
+                    Math.pow(atom[2] - center.z, 2)
+                );
+                if (distance <= range) {
+                    count++;
+                }
+            });
+            return count;
+        }
+
+        function randomAtoms(clear_previous) {
+            const radius = settings.atoms.radius;
+
+            if (!settings.colors || settings.colors.length === 0) {
+                console.error('Colors array is empty or not defined.');
+                return;
+            }
+
+            if (!settings.shapes || settings.shapes.length !== settings.colors.length) {
+                console.error('Shapes array is empty or does not match length of colors array.');
+                return;
+            }
+
+            const meshMaterials = settings.colors.map(color => new THREE.MeshBasicMaterial({
+                color: new THREE.Color(color),
+                side: THREE.DoubleSide
+            }));
+
+            if (clear_previous) {
+                atoms.length = 0;
+                while (settings.scene.atomsGroup.children.length) {
+                    settings.scene.atomsGroup.remove(settings.scene.atomsGroup.children[0]);
+                }
+            }
+
+            const colorShapeMapping = assignRandomShapesToColors(settings.colors);
+            const atomCounts = distributeAtoms(settings.nonce, settings.atoms.count, settings.colors.length);
+
+            for (let c = 0; c < settings.colors.length; c++) {
+                const color = settings.colors[c];
+                const shapeType = colorShapeMapping[color];
+                const clusters = Math.ceil(atomCounts[c] / 40);
+                for (let i = 0; i < clusters; i++) {
+                    const clusterCenter = {
+                        x: Math.random() * settings.dimensions,
+                        y: Math.random() * settings.dimensions,
+                        z: Math.random() * settings.dimensions
+                    };
+                    const atomsInCluster = Math.min(40, atomCounts[c] - i * 40);
+                    create(atomsInCluster, c, shapeType, radius, meshMaterials, clusterCenter);
+                }
+            }
+
+            console.log('Added atom group to scene.');
+        }
+
+        const addGridHelper = () => {
+            if (settings.scene.gridHelper) {
+                settings.scene.gridHelper.parent.remove(settings.scene.gridHelper);
+            }
+            settings.scene.gridHelper = new THREE.GridHelper(settings.dimensions, 10);
+            settings.scene.gridHelper.position.set(
+                settings.dimensions / 2,
+                0,
+                settings.dimensions / 2
+            );
+            settings.scene.scene.add(settings.scene.gridHelper);
+        };
+
+        const explorationDelay = 100;
+        setTimeout(() => {
+            explorationStarted = true;
+        }, explorationDelay);
+
+        let perturbationNonce = settings.nonce;
+        let time = 0;
+        let polarityFactor = 1;
+        const polarityInterval = 100;
+
+        const applyRules = () => {
+            total_v = 0.0;
+            const random = mulberry32(settings.nonce);
+            const perturbationStrength = 5;
+            const perturbationInterval = 1000;
+
+            if (time % polarityInterval === 0) {
+                polarityFactor *= 1;
+            }
+
+            // Update velocity first
+            for (const a of atoms) {
+                let fx = 0;
+                let fy = 0;
+                let fz = 0;
+                const r2 = settings.cutOff * settings.cutOff;
+                const collisionR2 = settings.collisionRadius * settings.collisionRadius;
+
+                for (const b of atoms) {
+                    let g = settings.rulesArray[a[6]] && settings.rulesArray[a[6]][b[6]];
+                    if (g !== undefined) {
+                        g += settings.oscillationAmplitude * Math.sin(time * settings.oscillationFrequency);
+                        g *= polarityFactor;
+                        const dx = a[0] - b[0];
+                        const dy = a[1] - b[1];
+                        const dz = a[2] - b[2];
+                        if (dx !== 0 || dy !== 0 || dz !== 0) {
+                            const d = dx * dx + dy * dy + dz * dz;
+                            if (d < r2) {
+                                const F = g / Math.sqrt(d);
+                                fx += F * dx;
+                                fy += F * dy;
+                                fz += F * dz;
+                            }
+                            // Collision handling
+                            if (d < collisionR2) {
+                                const overlap = settings.collisionRadius - Math.sqrt(d);
+                                fx += (overlap * dx) / Math.sqrt(d);
+                                fy += (overlap * dy) / Math.sqrt(d);
+                                fz += (overlap * dz) / Math.sqrt(d);
+                            }
+                        }
+                    }
+                }
+
+                // Random perturbation
+                if (explorationStarted) {
+                    perturbationNonce++;
+                    const perturbationRandom = mulberry32(perturbationNonce);
+                    if (Math.floor(perturbationRandom() * perturbationInterval) === 0) {
+                        fx += (perturbationRandom() - 0.5) * perturbationStrength;
+                        fy += (perturbationRandom() - 0.5) * perturbationStrength;
+                        fz += (perturbationRandom() - 0.5) * perturbationStrength;
+                    }
+                }
+
+                const vmix = 1.0 - settings.viscosity;
+                a[3] = a[3] * vmix + fx * settings.time_scale;
+                a[4] = a[4] * vmix + fy * settings.time_scale;
+                a[5] = a[5] * vmix + fz * settings.time_scale;
+
+                total_v += Math.abs(a[3]) + Math.abs(a[4]) + Math.abs(a[5]);
+            }
+
+            // Update positions
+            for (const a of atoms) {
+                a[0] += a[3];
+                a[1] += a[4];
+                a[2] += a[5];
+
+                // Boundary checks
+                if (a[0] < 0) {
+                    a[0] = -a[0];
+                    a[3] *= -1;
+                }
+                if (a[0] >= settings.dimensions) {
+                    a[0] = 2 * settings.dimensions - a[0];
+                    a[3] *= -1;
+                }
+                if (a[1] < 0) {
+                    a[1] = -a[1];
+                    a[4] *= -1;
+                }
+                if (a[1] >= settings.dimensions) {
+                    a[1] = 2 * settings.dimensions - a[1];
+                    a[4] *= -1;
+                }
+                if (a[2] < 0) {
+                    a[2] = -a[2];
+                    a[5] *= -1;
+                }
+                if (a[2] >= settings.dimensions) {
+                    a[2] = 2 * settings.dimensions - a[2];
+                    a[5] *= -1;
+                }
+                a[7].position.set(a[0], a[1], a[2]);
+            }
+
+            total_v /= atoms.length;
+            time += 1;
+        };
+
+        function assignForce() {
+            settings.rules = {};
+            const random = mulberry32(settings.nonce);
+
+            // Reinitialize colors
+            settings.colors = generateColorsFromNonce(settings.nonce, settings.colors.length);
+            const colors = settings.colors;
+            console.log('Colors in assignForce:', colors);
+
+            if (!colors || colors.length === 0) {
+                console.error('Colors array is empty or not defined.');
+                return;
+            }
+
+            // Initialize rules
+            colors.forEach(color => {
+                settings.rules[color] = {};
+                colors.forEach(targetColor => {
+                    settings.rules[color][targetColor] = random() * 1 - 1;
+                });
+            });
+
+            console.log('Assigned rules:', settings.rules);
+            flattenRules();
+
+            // Reinitialize atoms
+            randomAtoms(settings.atoms.count, true);
+            setupGUI(parsedData);
+        }
+
+        function updateNonceAndRules(blockNumber) {
+            if (!blockNumber) {
+                console.error('Invalid block number:', blockNumber);
+                return;
+            }
+
+            fetchBlockData(blockNumber).then(blockData => {
+                if (blockData) {
+                    settings.nonce = blockData.nonce;
+                    assignForce();
+                    setupGUI(parsedData);
+                } else {
+                    console.error('Failed to fetch block data.');
+                }
+            }).catch(error => {
+                console.error('Error fetching block data:', error);
+            });
+        }
+
+        function flattenRules() {
+            settings.rulesArray = [];
+            for (let i = 0; i < settings.colors.length; i++) {
+                const ruleRow = [];
+                for (let j = 0; j < settings.colors.length; j++) {
+                    ruleRow.push(settings.rules[settings.colors[i]][settings.colors[j]]);
+                }
+                settings.rulesArray.push(ruleRow);
+            }
+            console.log('Flattened rules:', settings.rulesArray);
+        }
+
+        function setupGUI(parsedData = null) {
+            if (settings.gui) {
+                settings.gui.destroy();
+            }
+
+            settings.gui = new GUI();
+            console.log('Setting up GUI with parsedData:', parsedData);
+
+            const configFolder = settings.gui.addFolder('Config');
+            configFolder.add(settings, 'reset').name('Reset');
+            configFolder.add({ assignForce: updateNonceAndRules }, 'assignForce').name('Assign Force');
+            configFolder.add(settings, 'fps').name('FPS - (Live)').listen().disable();
+            configFolder.add(settings.atoms, 'count', 1, 1000, 1).name('Atoms per-color').listen().onFinishChange(v => {
+                randomAtoms(v, true);
+            });
+            configFolder.add(settings, 'dimensions', 200, 5000, 100).name('Cube Dimensions').listen().onFinishChange(v => {
+                settings.dimensions = v;
+                resetScene();
+            });
+            configFolder.add(settings, 'time_scale', 0.1, 5, 0.01).name('Time Scale').listen();
+            configFolder.add(settings, 'cutOff', 1, 20000 * 2, 50).name('Max Distance').listen();
+            configFolder.add(settings, 'viscosity', 0.1, 2, 0.1).name('Viscosity').listen();
+            configFolder.add(settings, 'pulseDuration', 1, 100, 1).name('Click Pulse Duration').listen();
+            configFolder.add(settings, 'blockNumber').name('Block Number').listen();
+            configFolder.add(settings, 'nonce').name('Nonce').listen();
+
+            const rulesFolder = settings.gui.addFolder('Interaction Rules');
+            flattenRules();
+            settings.rulesArray.forEach((ruleSet, index) => {
+                const colorFolder = rulesFolder.addFolder(`Color ${index + 1}`);
+                ruleSet.forEach((rule, ruleIndex) => {
+                    const formattedRule = rule.toFixed(5);
+                    colorFolder.add({ rule: formattedRule }, 'rule')
+                        .name(`R${index + 1}-${ruleIndex + 1}`)
+                        .listen();
+                });
+            });
+            rulesFolder.open();
+
+            try {
+                if (parsedData && typeof parsedData === 'object') {
+                    console.log('Creating Block Info folder with data:', parsedData);
+                    const blockInfoFolder = settings.gui.addFolder('Block Info');
+
+                    const safeData = {
+                        blockNumber: parsedData.blockNumber || 'N/A',
+                        timestamp: parsedData.timestamp || 'N/A',
+                        transactions: parsedData.transactions || 'N/A',
+                        miner: parsedData.miner || 'N/A'
+                    };
+
+                    Object.entries(safeData).forEach(([key, value]) => {
+                        try {
+                            blockInfoFolder.add({ [key]: value }, key)
+                                .name(key.charAt(0).toUpperCase() + key.slice(1))
+                                .listen();
+                        } catch (err) {
+                            console.error(`Error adding ${key} to GUI:`, err);
+                        }
+                    });
+
+                    blockInfoFolder.open();
+                }
+            } catch (error) {
+                console.error('Error creating Block Info folder:', error);
+            }
+
+            console.log("GUI setup completed");
+        }
+
+        const animate = () => {
+            requestAnimationFrame(animate);
+            applyRules();
+            settings.scene.renderer.render(settings.scene.scene, settings.scene.camera);
+        };
+
+        window.onload = () => {
+            const result = JSON.stringify({ blk: "0" });
+            initialize(result);
+
+            const inputElement = document.getElementById('input');
+            if (inputElement) {
+                inputElement.addEventListener('input', (event) => {
+                    const blockNumber = event.target.value;
+                    updateNonceAndRules(blockNumber);
+                });
+            }
+        };
+
+        if (Object.keys(params).length > 0) {
+            const regex = /\b[a-zA-Z0-9]+i[0-9]+\b/;
+            let mintId = params.mint;
+            if (regex.test(mintId)) {
+                mintText = mintId;
+                nonce = params.nonce;
+            }
+        }
+
+        if (mintText.includes('MINT_INSCRIPTION_ID')) {
+            let input = document.getElementById('input');
+            input.style.display = 'block';
+            input.style.position = 'absolute';
+            input.style.fontSize = '20px';
+            input.style.margin = '20px';
+            input.style.top = '0';
+            input.style.left = '50%';
+            input.value = blockNumber;
+            input.addEventListener('input', (event) => {
+                blockNumber = input.value;
+                fetchBlockData(blockNumber);
+            });
+        } else {
+            const request = new XMLHttpRequest();
+            try {
+                request.open('GET', 'https://ordinals.com/content/' + mintText);
+                request.responseType = 'text';
+                request.addEventListener('load', () => initialize(request.response));
+                request.addEventListener('error', () => console.error('XHR error'));
+                request.send();
+            } catch (error) {
+                console.error(`XHR error ${request.status}`);
+            }
+        }
+
+        function initialize(result) {
+            if (result) {
+                const data = JSON.parse(result);
+                settings.blockNumber = data.blk;
+                if (!settings.nonce) {
+                    settings.nonce = data.nonce || 0;
+                    updateNonceAndRules(settings.blockNumber);
+                }
+
+                console.log('Initializing scene with block number:', settings.blockNumber);
+
+                if (sceneInitialized) return;
+                sceneInitialized = true;
+
+                const container = document.createElement('div');
+                document.body.appendChild(container);
+
+                const aspect = window.innerWidth / window.innerHeight;
+                settings.scene.camera = new THREE.PerspectiveCamera(45, aspect, 0.1, 5000);
+                settings.scene.camera.position.set(
+                    settings.dimensions * 2,
+                    settings.dimensions * 2,
+                    settings.dimensions * 2
+                );
+                settings.scene.camera.lookAt(
+                    new THREE.Vector3(
+                        settings.dimensions / 2,
+                        settings.dimensions / 2,
+                        settings.dimensions / 2
+                    )
+                );
+
+                settings.scene.scene = new THREE.Scene();
+                settings.scene.atomsGroup = new THREE.Group();
+                settings.scene.scene.add(settings.scene.atomsGroup);
+
+                settings.scene.renderer = new THREE.WebGLRenderer();
+                settings.scene.renderer.setPixelRatio(window.devicePixelRatio);
+                settings.scene.renderer.setSize(window.innerWidth, window.innerHeight);
+                container.appendChild(settings.scene.renderer.domElement);
+
+                settings.scene.controls = new OrbitControls(settings.scene.camera, settings.scene.renderer.domElement);
+                settings.scene.controls.target.set(
+                    settings.dimensions / 2,
+                    settings.dimensions / 2,
+                    settings.dimensions / 2
+                );
+                settings.scene.controls.update();
+
+                addGridHelper();
+
+                const numColors = 5;
+                settings.colors = generateColorsFromNonce(settings.nonce, numColors);
+
+                const numShapes = 5;
+                settings.shapes = generateShapesFromNonce(settings.nonce, settings.colors.length);
+
+                applySpecialEffects(settings.nonce);
+
+                assignForce();
+                animate();
+            }
+        }
+
+        Object.defineProperty(String.prototype, 'capitalise', {
+            value: function() {
+                return this.charAt(0).toUpperCase() + this.slice(1);
+            },
+            enumerable: false
+        });
+
+        function initializeRules() {
+            if (!settings.rules) {
+                settings.rules = {};
+            }
+            for (const atomColor of settings.colors) {
+                if (!settings.rules[atomColor]) {
+                    settings.rules[atomColor] = {};
+                }
+                for (const ruleColor of settings.colors) {
+                    if (settings.rules[atomColor][ruleColor] === undefined) {
+                        settings.rules[atomColor][ruleColor] = 0;
+                    }
+                }
+            }
+        }
+
+        function mulberry32(a) {
+            return function() {
+                var t = a += 0x6D2B79F5;
+                t = Math.imul(t ^ t >>> 15, t | 1);
+                t ^= t + Math.imul(t ^ t >>> 7, t | 61);
+                return ((t ^ t >>> 14) >>> 0) / 4294967296;
+            };
+        }
+
+        async function fetchBlockData(blockNumber) {
+            const url = `https://ordinals.com/r/blockinfo/${blockNumber}`;
+            try {
+                const response = await fetch(url);
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status} for URL: ${url}`);
+                }
+                const data = await response.json();
+                console.log('Fetched block data:', data);
+                blockInfo = data;
+
+                if (!data) {
+                    throw new Error('No data received');
+                }
+
+                const parsedData = {
+                    blockNumber: data.blockNumber || 'N/A',
+                    timestamp: data.timestamp || 'N/A',
+                    transactions: data.transactions ? data.transactions.length : 'N/A',
+                    miner: data.miner || 'N/A'
+                };
+
+                setupGUI(parsedData);
+                return data;
+            } catch (error) {
+                console.error('Error fetching block data:', error);
+                return null;
+            }
+        }
+
+        async function extractDMT() {
+            try {
+                const blockNumber = document.getElementById('input').value;
+                const blockData = await fetchBlockData(blockNumber);
+                if (blockData) {
+                    console.log('Block data:', blockData);
+                } else {
+                    console.error('Failed to fetch block data.');
+                }
+            } catch (error) {
+                console.error('Error extracting DMT:', error);
+            }
+        }
+
+        function randomX() {
+            return Math.random() * (settings.dimensions - 100) + 50;
+        }
+
+        function randomY() {
+            return Math.random() * (settings.dimensions - 100) + 50;
+        }
+
+        extractDMT(blockNumber);
+
+        var pulse = 0;
+        var pulse_x = 0, pulse_y = 0;
+        var total_v;
+
+        function updateSceneDimensions(newDimensions) {
+            settings.dimensions = newDimensions;
+            if (!settings.scene || !settings.scene.scene) {
+                console.error('Scene or scene.scene is not initialized.');
+                return;
+            }
+
+            if (settings.scene.gridHelper) {
+                settings.scene.scene.remove(settings.scene.gridHelper);
+            }
+            settings.scene.gridHelper = new THREE.GridHelper(settings.dimensions, 10);
+            settings.scene.scene.add(settings.scene.gridHelper);
+
+            settings.scene.camera.position.set(
+                settings.dimensions / 2,
+                settings.dimensions / 2,
+                settings.dimensions * 1.5
+            );
+            settings.scene.camera.lookAt(new THREE.Vector3(settings.dimensions / 2, settings.dimensions / 2, 0));
+            settings.scene.controls.update();
+        }
+
+        extractDMT(blockNumber);
+        setupGUI(parsedData);
+        settings.gui.close();
+        console.log('settings', settings);
+
+        var lastT = Date.now();
+        function updateParams() {
+            var curT = Date.now();
+            if (curT > lastT) {
+                const new_fps = 1000.0 / (curT - lastT);
+                settings.fps = Math.round(settings.fps * 0.8 + new_fps * 0.2);
+                lastT = curT;
+            }
+        }
+    </script>
+</body>
+</html>
+
+
+
+        
+   
+   
