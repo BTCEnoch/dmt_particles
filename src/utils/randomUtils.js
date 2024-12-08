@@ -1,23 +1,25 @@
 export function mulberry32(seed) {
     return function () {
-        let t = (seed += 0x6d2b79f5);
-        t = Math.imul(t ^ (t >>> 15), t | 1);
-        t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
-        return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+      let t = (seed += 0x6d2b79f5);
+      t = Math.imul(t ^ (t >>> 15), t | 1);
+      t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
     };
-}
-
-export function generateColorsFromNonce(nonce, numColors) {
+  }
+  
+  export function generateColorsFromNonce(nonce, numColors) {
     const rand = mulberry32(nonce);
     const colors = [];
     for (let i = 0; i < numColors; i++) {
-        const hue = rand();
-        const saturation = 0.8;
-        const lightness = 0.5;
-        colors.push(`hsl(${Math.round(hue * 360)}, ${saturation * 100}%, ${lightness * 100}%)`);
+      const hue = Math.round(rand() * 360);
+      const saturation = 80; // Fixed saturation percentage
+      const lightness = 50; // Fixed lightness percentage
+      colors.push(`hsl(${hue}, ${saturation}%, ${lightness}%)`);
     }
+    console.log("Generated Colors:", colors);
     return colors;
-}
+  }
+  
 
 export function assignRandomShapesToColors(colors) {
     const shapeTypes = ['sphere', 'box', 'cone', 'cylinder', 'torus'];
