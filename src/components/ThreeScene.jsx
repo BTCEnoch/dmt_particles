@@ -7,17 +7,14 @@ const ThreeScene = () => {
   const sceneRef = useRef(null);
   const cameraRef = useRef(null);
   const rendererRef = useRef(null);
-  const particlesRef = useRef([]);
-  const trailsRef = useRef([]);
+  const particlesVelocityRef = useRef([]); // Stores velocities for particles
 
   const [settings, setSettings] = useState({
     numParticles: 500,
     dimensions: 100,
     speed: 2,
     viscosity: 0.95,
-    cutoff: 20,
-    collisionRadius: 5,
-    trailLength: 2, // Keep trails short for a tight-following effect
+    trailLength: 2,
     colors: [0xff0000, 0x00ff00, 0x0000ff], // Red, green, blue
   });
 
@@ -69,122 +66,112 @@ const ThreeScene = () => {
     scene.add(cubeOutline);
   };
 
-  // Initialize particles and trails
+  // Initialize particles using InstancedMesh
   const initializeParticles = () => {
-    const particles = [];
-    const trails = [];
     const { numParticles, dimensions, colors } = settings;
 
-    particlesRef.current.forEach((particle) => {
-      sceneRef.current.remove(particle);
+    // Remove old particle system
+    const oldParticles = sceneRef.current.getObjectByName("particleMesh");
+    if (oldParticles) sceneRef.current.remove(oldParticles);
+
+    // Create shared geometry and material
+    const geometry = new THREE.SphereGeometry(0.5, 16, 16);
+    const material = new THREE.MeshBasicMaterial({
+      color: 0xffffff,
+      transparent: true,
+      opacity: 0.8,
+      blending: THREE.AdditiveBlending,
     });
-    trailsRef.current.forEach((trail) => {
-      sceneRef.current.remove(trail);
-    });
+
+    const particleMesh = new THREE.InstancedMesh(geometry, material, numParticles);
+    particleMesh.name = "particleMesh";
+
+    const dummyObject = new THREE.Object3D();
+    const velocities = [];
 
     for (let i = 0; i < numParticles; i++) {
-      // Create particle geometry
-      const geometry = new THREE.SphereGeometry(Math.random() * 0.5 + 0.5, 16, 16);
-      const colorIndex = Math.floor(Math.random() * colors.length);
-      const material = new THREE.MeshBasicMaterial({
-        color: colors[colorIndex],
-        transparent: true,
-        opacity: 0.8,
-        blending: THREE.AdditiveBlending,
-      });
+      // Random initial position
+      const x = Math.random() * dimensions - dimensions / 2;
+      const y = Math.random() * dimensions - dimensions / 2;
+      const z = Math.random() * dimensions - dimensions / 2;
 
-      const particle = new THREE.Mesh(geometry, material);
+      dummyObject.position.set(x, y, z);
+      dummyObject.updateMatrix();
+      particleMesh.setMatrixAt(i, dummyObject.matrix);
 
-      // Set random initial position
-      particle.position.set(
-        Math.random() * dimensions - dimensions / 2,
-        Math.random() * dimensions - dimensions / 2,
-        Math.random() * dimensions - dimensions / 2
+      // Assign random velocities
+      velocities.push(
+        new THREE.Vector3(
+          (Math.random() - 0.5) * settings.speed,
+          (Math.random() - 0.5) * settings.speed,
+          (Math.random() - 0.5) * settings.speed
+        )
       );
-
-      // Set random velocity
-      particle.velocity = new THREE.Vector3(
-        (Math.random() - 0.5) * settings.speed,
-        (Math.random() - 0.5) * settings.speed,
-        (Math.random() - 0.5) * settings.speed
-      );
-
-      particle.colorIndex = colorIndex;
-
-      // Create trail geometry
-      const trailGeometry = new THREE.BufferGeometry();
-      const trailPositions = new Float32Array(6); // 2 points for a short trail
-      for (let j = 0; j < 6; j += 3) {
-        trailPositions[j + 0] = particle.position.x; // X
-        trailPositions[j + 1] = particle.position.y; // Y
-        trailPositions[j + 2] = particle.position.z; // Z
-      }
-
-      trailGeometry.setAttribute(
-        "position",
-        new THREE.BufferAttribute(trailPositions, 3)
-      );
-
-      const trailMaterial = new THREE.LineBasicMaterial({
-        color: colors[colorIndex],
-        transparent: true,
-        opacity: 0.5,
-      });
-
-      const trail = new THREE.Line(trailGeometry, trailMaterial);
-
-      // Add particle and trail to the scene
-      sceneRef.current.add(particle);
-      sceneRef.current.add(trail);
-
-      particles.push(particle);
-      trails.push(trail);
     }
 
-    particlesRef.current = particles;
-    trailsRef.current = trails;
+    particleMesh.instanceMatrix.needsUpdate = true;
+    sceneRef.current.add(particleMesh);
+    particlesVelocityRef.current = velocities; // Save velocities
   };
 
-  // Animate particles and trails
+  // Animate particles
   const animateParticles = () => {
-    const particles = particlesRef.current;
-    const trails = trailsRef.current;
-    const { dimensions } = settings;
-
-    particles.forEach((particle, index) => {
-      // Update particle position
-      particle.position.add(particle.velocity);
-
-      // Bounce off walls
+    const { dimensions, viscosity } = settings;
+    const particleMesh = sceneRef.current.getObjectByName("particleMesh");
+  
+    if (!particleMesh) return;
+  
+    const dummyObject = new THREE.Object3D(); // Helper object
+    const velocities = particlesVelocityRef.current; // Particle velocities
+  
+    for (let i = 0; i < settings.numParticles; i++) {
+      const velocity = velocities[i];
+  
+      // Retrieve the particle's current matrix
+      particleMesh.getMatrixAt(i, dummyObject.matrix);
+      dummyObject.matrix.decompose(dummyObject.position, dummyObject.quaternion, dummyObject.scale);
+  
+      // Update position using velocity
+      dummyObject.position.add(velocity);
+  
+      // Bounce off walls and apply viscosity
       ["x", "y", "z"].forEach((axis) => {
         if (
-          particle.position[axis] > dimensions / 2 ||
-          particle.position[axis] < -dimensions / 2
+          dummyObject.position[axis] > dimensions / 2 ||
+          dummyObject.position[axis] < -dimensions / 2
         ) {
-          particle.velocity[axis] = -particle.velocity[axis];
+          velocity[axis] = -velocity[axis]; // Reverse direction
         }
+        velocity[axis] *= viscosity; // Apply viscosity damping
       });
-
-      // Update trail to follow the particle
-      const trail = trails[index];
-      const positions = trail.geometry.attributes.position.array;
-
-      // Update the last point to match the current particle position
-      positions[3] = positions[0];
-      positions[4] = positions[1];
-      positions[5] = positions[2];
-
-      positions[0] = particle.position.x;
-      positions[1] = particle.position.y;
-      positions[2] = particle.position.z;
-
-      trail.geometry.attributes.position.needsUpdate = true; // Notify Three.js
-    });
+  
+      // Update matrix with new position
+      dummyObject.updateMatrix();
+      particleMesh.setMatrixAt(i, dummyObject.matrix);
+    }
+  
+    // Notify Three.js to update the instance matrix
+    particleMesh.instanceMatrix.needsUpdate = true;
   };
+  
 
+  // Adaptive animation loop
+  let frameCount = 0;
   const animate = () => {
-    animateParticles();
-    rendererRef.current.render(sceneRef.current, cameraRef.current);
+    const start = performance.now();
+
+    if (frameCount % 2 === 0) {
+      animateParticles();
+      rendererRef.current.render(sceneRef.current, cameraRef.current);
+    }
+
+    frameCount++;
+    const end = performance.now();
+
+    if (end - start > 16) {
+      console.warn(`[Performance Warning] Frame time: ${end - start}ms`);
+    }
+
     requestAnimationFrame(animate);
   };
 
@@ -219,12 +206,26 @@ const ThreeScene = () => {
         </label>
         <br />
         <label>
-          Trail Length:
+          Dimensions:
           <input
             type="number"
-            value={settings.trailLength}
+            value={settings.dimensions}
             onChange={(e) =>
-              setSettings({ ...settings, trailLength: parseInt(e.target.value, 10) })
+              setSettings({ ...settings, dimensions: parseInt(e.target.value, 10) })
+            }
+          />
+        </label>
+        <br />
+        <label>
+          Speed:
+          <input
+            type="range"
+            min="0.1"
+            max="5"
+            step="0.1"
+            value={settings.speed}
+            onChange={(e) =>
+              setSettings({ ...settings, speed: parseFloat(e.target.value) })
             }
           />
         </label>
@@ -234,5 +235,4 @@ const ThreeScene = () => {
 };
 
 export default ThreeScene;
-
 
