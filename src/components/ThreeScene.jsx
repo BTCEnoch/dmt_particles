@@ -1,177 +1,238 @@
-import React, { useEffect, useRef } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls";
 
 const ThreeScene = () => {
-  const containerRef = useRef(null); // Reference for the HTML container
-  const sceneRef = useRef(null); // Reference for the scene
-  const cameraRef = useRef(null); // Reference for the camera
-  const rendererRef = useRef(null); // Reference for the renderer
-  const atomsRef = useRef([]); // Reference for the particles (atoms)
-  
-  const settings = {
-    numParticles: 500, // Number of particles in the scene
-    dimensions: 100, // Size of the cube containing particles
-    colors: [0xff0000, 0x00ff00, 0x0000ff], // Red, Green, Blue colors for particles
-  };
+  const containerRef = useRef(null);
+  const sceneRef = useRef(null);
+  const cameraRef = useRef(null);
+  const rendererRef = useRef(null);
+  const particlesRef = useRef([]);
+  const trailsRef = useRef([]);
 
-  // STEP 1: Initialize the scene, camera, and renderer
+  const [settings, setSettings] = useState({
+    numParticles: 500,
+    dimensions: 100,
+    speed: 2,
+    viscosity: 0.95,
+    cutoff: 20,
+    collisionRadius: 5,
+    trailLength: 2, // Keep trails short for a tight-following effect
+    colors: [0xff0000, 0x00ff00, 0x0000ff], // Red, green, blue
+  });
+
+  // Initialize the scene
   const initializeScene = () => {
-    const container = containerRef.current; // Get the HTML container
+    const container = containerRef.current;
     if (!container) return;
 
-    // 1. Create the scene
     const scene = new THREE.Scene();
-    scene.background = new THREE.Color(0x000000); // Set background to black
+    scene.background = new THREE.Color(0x000000);
     sceneRef.current = scene;
 
-    // 2. Create the camera
     const camera = new THREE.PerspectiveCamera(
-      75, // Field of view
-      container.clientWidth / container.clientHeight, // Aspect ratio
-      0.1, // Near clipping plane
-      1000 // Far clipping plane
+      75,
+      container.clientWidth / container.clientHeight,
+      0.1,
+      1000
     );
-    camera.position.set(0, 120, 150); // Position the camera
-    camera.lookAt(0, 0, 0); // Make the camera look at the center of the scene
+    camera.position.set(0, 120, 150);
+    camera.lookAt(0, 0, 0);
     cameraRef.current = camera;
 
-    // 3. Create the renderer
     const renderer = new THREE.WebGLRenderer({ antialias: true });
-    renderer.setSize(container.clientWidth, container.clientHeight); // Set the renderer size
-    container.appendChild(renderer.domElement); // Attach the renderer to the DOM
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    renderer.setSize(container.clientWidth, container.clientHeight);
+    container.appendChild(renderer.domElement);
     rendererRef.current = renderer;
 
-    // 4. Add orbit controls for user interaction
     const controls = new OrbitControls(camera, renderer.domElement);
-    controls.enableDamping = true; // Add damping for smooth movement
+    controls.enableDamping = true;
     controls.dampingFactor = 0.1;
-    controls.target.set(0, 0, 0); // Focus on the center of the scene
     controls.update();
 
-    // STEP 2: Add lights
-    const ambientLight = new THREE.AmbientLight(0xffffff, 0.3); // Soft ambient light
+    const ambientLight = new THREE.AmbientLight(0xffffff, 0.3);
     scene.add(ambientLight);
 
-    const pointLight = new THREE.PointLight(0xffffff, 1); // Point light for shading
+    const pointLight = new THREE.PointLight(0xffffff, 1);
     pointLight.position.set(50, 50, 50);
     scene.add(pointLight);
 
-    // STEP 3: Add the cube outline (container)
-    const boxGeometry = new THREE.BoxGeometry(
+    const cubeGeometry = new THREE.BoxGeometry(
       settings.dimensions,
       settings.dimensions,
       settings.dimensions
     );
-    const edgesGeometry = new THREE.EdgesGeometry(boxGeometry);
-    const edgesMaterial = new THREE.LineBasicMaterial({ color: 0x00ffff }); // Cyan outline
-    const cubeOutline = new THREE.LineSegments(edgesGeometry, edgesMaterial);
+    const edges = new THREE.EdgesGeometry(cubeGeometry);
+    const edgesMaterial = new THREE.LineBasicMaterial({ color: 0x00ffff });
+    const cubeOutline = new THREE.LineSegments(edges, edgesMaterial);
     scene.add(cubeOutline);
-
-    // STEP 4: Add a floor (grid helper)
-    const gridHelper = new THREE.GridHelper(settings.dimensions, 10);
-    gridHelper.position.y = -settings.dimensions / 2; // Align grid with the bottom of the cube
-    scene.add(gridHelper);
   };
 
-  // STEP 5: Initialize particles (atoms)
+  // Initialize particles and trails
   const initializeParticles = () => {
-    const atoms = []; // Array to store particle details
-    const { numParticles, dimensions, colors } = settings; // Destructure settings
+    const particles = [];
+    const trails = [];
+    const { numParticles, dimensions, colors } = settings;
+
+    particlesRef.current.forEach((particle) => {
+      sceneRef.current.remove(particle);
+    });
+    trailsRef.current.forEach((trail) => {
+      sceneRef.current.remove(trail);
+    });
 
     for (let i = 0; i < numParticles; i++) {
-      // Create a random geometry (sphere or cube)
-      const geometry =
-        Math.random() > 0.5
-          ? new THREE.SphereGeometry(Math.random() * 2 + 1, 16, 16) // Random sphere
-          : new THREE.BoxGeometry(
-              Math.random() * 2 + 1,
-              Math.random() * 2 + 1,
-              Math.random() * 2 + 1
-            ); // Random cube
-
-      // Assign a random color from settings.colors
+      // Create particle geometry
+      const geometry = new THREE.SphereGeometry(Math.random() * 0.5 + 0.5, 16, 16);
       const colorIndex = Math.floor(Math.random() * colors.length);
-      const material = new THREE.MeshStandardMaterial({
+      const material = new THREE.MeshBasicMaterial({
         color: colors[colorIndex],
-        metalness: 0.5, // Adds metallic appearance
-        roughness: 0.7, // Adjust roughness for realism
+        transparent: true,
+        opacity: 0.8,
+        blending: THREE.AdditiveBlending,
       });
 
-      // Create the particle mesh
       const particle = new THREE.Mesh(geometry, material);
 
-      // Randomly position the particle within the cube
+      // Set random initial position
       particle.position.set(
         Math.random() * dimensions - dimensions / 2,
         Math.random() * dimensions - dimensions / 2,
         Math.random() * dimensions - dimensions / 2
       );
 
-      // Assign random velocity for movement
+      // Set random velocity
       particle.velocity = new THREE.Vector3(
-        (Math.random() - 0.5) * 2, // X-axis velocity
-        (Math.random() - 0.5) * 2, // Y-axis velocity
-        (Math.random() - 0.5) * 2 // Z-axis velocity
+        (Math.random() - 0.5) * settings.speed,
+        (Math.random() - 0.5) * settings.speed,
+        (Math.random() - 0.5) * settings.speed
       );
 
-      // Add the particle to the scene
-      sceneRef.current.add(particle);
+      particle.colorIndex = colorIndex;
 
-      // Save the particle in the atoms array
-      atoms.push(particle);
+      // Create trail geometry
+      const trailGeometry = new THREE.BufferGeometry();
+      const trailPositions = new Float32Array(6); // 2 points for a short trail
+      for (let j = 0; j < 6; j += 3) {
+        trailPositions[j + 0] = particle.position.x; // X
+        trailPositions[j + 1] = particle.position.y; // Y
+        trailPositions[j + 2] = particle.position.z; // Z
+      }
+
+      trailGeometry.setAttribute(
+        "position",
+        new THREE.BufferAttribute(trailPositions, 3)
+      );
+
+      const trailMaterial = new THREE.LineBasicMaterial({
+        color: colors[colorIndex],
+        transparent: true,
+        opacity: 0.5,
+      });
+
+      const trail = new THREE.Line(trailGeometry, trailMaterial);
+
+      // Add particle and trail to the scene
+      sceneRef.current.add(particle);
+      sceneRef.current.add(trail);
+
+      particles.push(particle);
+      trails.push(trail);
     }
 
-    // Save particles in a reference for animation
-    atomsRef.current = atoms;
+    particlesRef.current = particles;
+    trailsRef.current = trails;
   };
 
-  // STEP 6: Animate particles
+  // Animate particles and trails
   const animateParticles = () => {
-    const atoms = atomsRef.current;
-    const dimensions = settings.dimensions / 2;
+    const particles = particlesRef.current;
+    const trails = trailsRef.current;
+    const { dimensions } = settings;
 
-    atoms.forEach((particle) => {
-      // Update particle position based on velocity
+    particles.forEach((particle, index) => {
+      // Update particle position
       particle.position.add(particle.velocity);
 
-      // Make particles bounce off the walls
+      // Bounce off walls
       ["x", "y", "z"].forEach((axis) => {
         if (
-          particle.position[axis] > dimensions ||
-          particle.position[axis] < -dimensions
+          particle.position[axis] > dimensions / 2 ||
+          particle.position[axis] < -dimensions / 2
         ) {
-          particle.velocity[axis] = -particle.velocity[axis]; // Reverse direction
+          particle.velocity[axis] = -particle.velocity[axis];
         }
       });
+
+      // Update trail to follow the particle
+      const trail = trails[index];
+      const positions = trail.geometry.attributes.position.array;
+
+      // Update the last point to match the current particle position
+      positions[3] = positions[0];
+      positions[4] = positions[1];
+      positions[5] = positions[2];
+
+      positions[0] = particle.position.x;
+      positions[1] = particle.position.y;
+      positions[2] = particle.position.z;
+
+      trail.geometry.attributes.position.needsUpdate = true; // Notify Three.js
     });
   };
 
-  // STEP 7: Animate the scene
   const animate = () => {
-    animateParticles(); // Update particle positions
-    rendererRef.current.render(sceneRef.current, cameraRef.current); // Render the scene
-    requestAnimationFrame(animate); // Call animate recursively
+    animateParticles();
+    rendererRef.current.render(sceneRef.current, cameraRef.current);
+    requestAnimationFrame(animate);
   };
 
-  // STEP 8: Initialize and start the scene
   useEffect(() => {
     initializeScene();
     initializeParticles();
     animate();
 
-    // Cleanup function to dispose of renderer on unmount
     return () => {
       if (rendererRef.current) rendererRef.current.dispose();
     };
   }, []);
 
-  return <div ref={containerRef} style={{ width: "100%", height: "100vh" }} />;
+  useEffect(() => {
+    initializeParticles();
+  }, [settings]);
+
+  return (
+    <div style={{ display: "flex", height: "100vh" }}>
+      <div ref={containerRef} style={{ flex: 1 }} />
+      <div style={{ width: "300px", padding: "10px", background: "#222", color: "#fff" }}>
+        <h3>Settings</h3>
+        <label>
+          Particle Count:
+          <input
+            type="number"
+            value={settings.numParticles}
+            onChange={(e) =>
+              setSettings({ ...settings, numParticles: parseInt(e.target.value, 10) })
+            }
+          />
+        </label>
+        <br />
+        <label>
+          Trail Length:
+          <input
+            type="number"
+            value={settings.trailLength}
+            onChange={(e) =>
+              setSettings({ ...settings, trailLength: parseInt(e.target.value, 10) })
+            }
+          />
+        </label>
+      </div>
+    </div>
+  );
 };
 
 export default ThreeScene;
-
-
-
 
 
