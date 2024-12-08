@@ -12,20 +12,24 @@ export function generateColorsFromNonce(nonce, numColors) {
   return colors;
 }
 
-export function generateRules(colors, nonce) {
-  const rand = mulberry32(nonce);
+export function generateRules(colors, seed) {
+  const rand = mulberry32(seed);
   const rules = {};
   colors.forEach((color) => {
     rules[color] = {};
     colors.forEach((targetColor) => {
-      rules[color][targetColor] = rand() * 2 - 1; // Random value between -1 and 1
+      rules[color][targetColor] = rand() * 2 - 1; // Random values between -1 and 1
     });
   });
   return rules;
 }
 
 export const flattenRules = (rules, colors) => {
-  return colors.map((sourceColor) =>
-    colors.map((targetColor) => rules[sourceColor][targetColor] || 0)
-  );
+  const rulesArray = [];
+  colors.forEach((color) => {
+    const row = colors.map((targetColor) => rules[color]?.[targetColor] || 0);
+    rulesArray.push(row);
+  });
+  return rulesArray;
 };
+

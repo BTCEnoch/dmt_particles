@@ -1,8 +1,11 @@
 import React, { useEffect, useRef } from "react";
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls";
+import { generateRules, flattenRules } from "../utils/rulesUtils";
 
-const ThreeScene = ({ settings }) => {
+
+const ThreeScene = ({ settings, blockNumber }) => {
+  console.log("Block Number in ThreeScene:", blockNumber);
   const containerRef = useRef(null);
   const sceneRef = useRef(null);
   const cameraRef = useRef(null);
@@ -11,6 +14,80 @@ const ThreeScene = ({ settings }) => {
   const atomsRef = useRef([]);
   const instancedMeshRef = useRef(null);
   const timeRef = useRef(0);
+
+  const applyRules = () => {
+    const { rulesArray } = settings;
+  
+    if (!rulesArray || rulesArray.length === 0) {
+      console.warn("Interaction rules are not defined or empty.");
+      return; // Skip applying rules if they are not initialized
+    }
+  
+    if (!instancedMeshRef.current) {
+      console.warn("Instanced mesh is not initialized yet.");
+      return; // Skip applying rules if particles are not initialized
+    }
+  
+    const aData = atomsRef.current;
+    const { timeScale, viscosity, cutOff, dimensions } = settings;
+    const r2 = cutOff * cutOff; // Squared cutoff distance for performance
+  
+    for (let i = 0; i < aData.length; i++) {
+      let fx = 0,
+        fy = 0,
+        fz = 0; // Forces acting on particle `a`
+      const a = aData[i];
+  
+      for (let j = 0; j < aData.length; j++) {
+        if (i === j) continue; // Skip self-interaction
+  
+        const b = aData[j];
+        const interactionForce = rulesArray[a[6]]?.[b[6]];
+        if (interactionForce === undefined) continue; // Skip if no interaction rule is defined
+  
+        const dx = a[0] - b[0];
+        const dy = a[1] - b[1];
+        const dz = a[2] - b[2];
+        const distanceSquared = dx * dx + dy * dy + dz * dz;
+  
+        if (distanceSquared < r2 && distanceSquared > 0) {
+          const distance = Math.sqrt(distanceSquared);
+          const force = (interactionForce / distance) * timeScale; // Force inversely proportional to distance
+  
+          fx += force * dx;
+          fy += force * dy;
+          fz += force * dz;
+        }
+      }
+  
+      // Apply forces and update velocities with viscosity
+      a[3] = a[3] * viscosity + fx;
+      a[4] = a[4] * viscosity + fy;
+      a[5] = a[5] * viscosity + fz;
+    }
+  
+    // Update positions and apply boundary conditions
+    for (let i = 0; i < aData.length; i++) {
+      const a = aData[i];
+      a[0] += a[3];
+      a[1] += a[4];
+      a[2] += a[5];
+  
+      // Boundary collisions (bouncing particles)
+      if (a[0] < 0 || a[0] > dimensions) a[3] *= -1;
+      if (a[1] < 0 || a[1] > dimensions) a[4] *= -1;
+      if (a[2] < 0 || a[2] > dimensions) a[5] *= -1;
+  
+      // Update particle position in instanced mesh
+      const dummy = new THREE.Object3D();
+      dummy.position.set(a[0], a[1], a[2]);
+      dummy.updateMatrix();
+      instancedMeshRef.current.setMatrixAt(a[7], dummy.matrix);
+    }
+  
+    instancedMeshRef.current.instanceMatrix.needsUpdate = true; // Update the instanced mesh
+  };
+  
 
   useEffect(() => {
     initializeScene();
@@ -27,6 +104,28 @@ const ThreeScene = ({ settings }) => {
     updateCubeOutline();
   }, [settings.colors, settings.atomsPerColor, settings.dimensions]);
 
+  const animate = () => {
+    if (!settings.isReady) {
+      console.warn("Skipping animation loop until settings are ready.");
+      requestAnimationFrame(animate);
+      return;
+    }
+  
+    console.log("Animation loop running...");
+  
+    applyRules(); // Update particle positions based on interactions
+  
+    const renderer = rendererRef.current;
+    const scene = sceneRef.current;
+    const camera = cameraRef.current;
+  
+    if (scene && camera && renderer) {
+      renderer.render(scene, camera);
+    }
+  
+    requestAnimationFrame(animate); // Continue the animation loop
+  };
+  
   const initializeScene = () => {
     const container = containerRef.current;
     if (!container) return;
@@ -85,60 +184,80 @@ const ThreeScene = ({ settings }) => {
   const createAtoms = () => {
     const scene = sceneRef.current;
     if (!scene) return;
-
+  
+    // Remove old particles
     if (instancedMeshRef.current) {
       scene.remove(instancedMeshRef.current);
     }
-
+  
+    // Debugging settings
+    console.log("Creating atoms with settings:", {
+      colors: settings.colors,
+      atomsPerColor: settings.atomsPerColor,
+      dimensions: settings.dimensions,
+    });
+  
+    if (!settings.colors || settings.colors.length === 0) {
+      console.error("No colors provided in settings.colors.");
+      return;
+    }
+  
+    if (!settings.atomsPerColor || settings.atomsPerColor <= 0) {
+      console.error("Invalid value for settings.atomsPerColor.");
+      return;
+    }
+  
     const numParticles = settings.atomsPerColor * settings.colors.length;
     const geometry = new THREE.SphereGeometry(1, 16, 16);
     const material = new THREE.MeshBasicMaterial({ color: 0xffffff });
     const instancedMesh = new THREE.InstancedMesh(geometry, material, numParticles);
-
+  
     const dummy = new THREE.Object3D();
     const newAtoms = [];
-
+  
     let index = 0;
-    console.log("Creating atoms...");
     settings.colors.forEach((color, cIndex) => {
-      console.log(`Color ${cIndex}: ${color}`);
+      console.log(`Creating particles for color ${cIndex}: ${color}`);
       material.color.set(color);
-
+  
       for (let i = 0; i < settings.atomsPerColor; i++) {
         const x = Math.random() * settings.dimensions;
         const y = Math.random() * settings.dimensions;
         const z = Math.random() * settings.dimensions;
-
+  
         dummy.position.set(x, y, z);
         dummy.updateMatrix();
         instancedMesh.setMatrixAt(index, dummy.matrix);
-
+  
         newAtoms.push([x, y, z, 0, 0, 0, cIndex, index]);
         index++;
       }
     });
-
+  
     instancedMesh.instanceMatrix.needsUpdate = true;
     scene.add(instancedMesh);
     instancedMeshRef.current = instancedMesh;
     atomsRef.current = newAtoms;
-
+  
     console.log(`Created ${newAtoms.length} atoms.`);
   };
+  
 
-  const animate = () => {
-    requestAnimationFrame(animate);
 
-    const renderer = rendererRef.current;
-    const scene = sceneRef.current;
-    const camera = cameraRef.current;
-
-    if (scene && camera && renderer) {
-      renderer.render(scene, camera);
+  useEffect(() => {
+    if (settings.isReady) {
+      console.log("Settings are ready, starting animation loop...");
+      animate();
     }
+  }, [settings.isReady]);
 
-    timeRef.current += 0.01;
-  };
+  useEffect(() => {
+    setSettings((prev) => ({
+      ...prev,
+      isReady: false, // Reset isReady
+    }));
+  }, [blockNumber]);
+  
 
   return (
     <div style={{ display: "flex", height: "100vh" }}>
