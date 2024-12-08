@@ -22,6 +22,7 @@ const ThreeScene = ({ settings }) => {
   }, []);
 
   useEffect(() => {
+    console.log("Settings updated:", settings);
     createAtoms();
     updateCubeOutline();
   }, [settings.colors, settings.atomsPerColor, settings.dimensions]);
@@ -98,7 +99,9 @@ const ThreeScene = ({ settings }) => {
     const newAtoms = [];
 
     let index = 0;
+    console.log("Creating atoms...");
     settings.colors.forEach((color, cIndex) => {
+      console.log(`Color ${cIndex}: ${color}`);
       material.color.set(color);
 
       for (let i = 0; i < settings.atomsPerColor; i++) {
@@ -119,68 +122,12 @@ const ThreeScene = ({ settings }) => {
     scene.add(instancedMesh);
     instancedMeshRef.current = instancedMesh;
     atomsRef.current = newAtoms;
-  };
 
-  const applyRules = () => {
-    const aData = atomsRef.current;
-    const instancedMesh = instancedMeshRef.current;
-    const { timeScale, viscosity, cutOff, rulesArray, dimensions } = settings;
-
-    if (!instancedMesh) return;
-
-    const dummy = new THREE.Object3D();
-    const r2 = cutOff * cutOff;
-
-    for (let i = 0; i < aData.length; i++) {
-      let fx = 0,
-        fy = 0,
-        fz = 0;
-      const a = aData[i];
-
-      for (let j = 0; j < aData.length; j++) {
-        if (i === j) continue;
-
-        const b = aData[j];
-        const g = rulesArray[a[6]][b[6]];
-
-        const dx = a[0] - b[0];
-        const dy = a[1] - b[1];
-        const dz = a[2] - b[2];
-        const d = dx * dx + dy * dy + dz * dz;
-
-        if (d < r2 && d > 0) {
-          const dist = Math.sqrt(d);
-          const F = g / dist;
-          fx += F * dx;
-          fy += F * dy;
-          fz += F * dz;
-        }
-      }
-
-      a[3] += fx * timeScale;
-      a[4] += fy * timeScale;
-      a[5] += fz * timeScale;
-
-      a[0] += a[3];
-      a[1] += a[4];
-      a[2] += a[5];
-
-      if (a[0] < 0 || a[0] > dimensions) a[3] *= -1;
-      if (a[1] < 0 || a[1] > dimensions) a[4] *= -1;
-      if (a[2] < 0 || a[2] > dimensions) a[5] *= -1;
-
-      dummy.position.set(a[0], a[1], a[2]);
-      dummy.updateMatrix();
-      instancedMesh.setMatrixAt(a[7], dummy.matrix);
-    }
-
-    instancedMesh.instanceMatrix.needsUpdate = true;
+    console.log(`Created ${newAtoms.length} atoms.`);
   };
 
   const animate = () => {
     requestAnimationFrame(animate);
-
-    applyRules();
 
     const renderer = rendererRef.current;
     const scene = sceneRef.current;
@@ -189,6 +136,8 @@ const ThreeScene = ({ settings }) => {
     if (scene && camera && renderer) {
       renderer.render(scene, camera);
     }
+
+    timeRef.current += 0.01;
   };
 
   return (
