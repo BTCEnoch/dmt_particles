@@ -4,7 +4,7 @@ import { OrbitControls } from "three/examples/jsm/controls/OrbitControls";
 import { generateRules, flattenRules } from "../utils/rulesUtils";
 
 
-const ThreeScene = ({ settings, blockNumber }) => {
+const ThreeScene = ({ settings, blockNumber, updateSettings }) => {
   console.log("Block Number in ThreeScene:", blockNumber);
   const containerRef = useRef(null);
   const sceneRef = useRef(null);
@@ -252,12 +252,13 @@ const ThreeScene = ({ settings, blockNumber }) => {
   }, [settings.isReady]);
 
   useEffect(() => {
-    setSettings((prev) => ({
+    updateSettings((prev) => ({
       ...prev,
       isReady: false, // Reset isReady
     }));
   }, [blockNumber]);
-  
+
+  console.log("Received Block Number in ThreeScene:", blockNumber);
 
   return (
     <div style={{ display: "flex", height: "100vh" }}>

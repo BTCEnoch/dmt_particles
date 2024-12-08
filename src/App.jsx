@@ -23,11 +23,12 @@ const App = () => {
     isReady: false, // Indicates if the app is ready for animation
   });
 
+  // Function to update settings
   const updateSettings = (newSettings) => {
     setSettings((prev) => ({ ...prev, ...newSettings }));
   };
 
-  // Fetch block data and generate settings based on the block number
+  // Fetch block data and update settings when blockNumber changes
   useEffect(() => {
     const fetchAndSetBlockData = async () => {
       if (blockNumber > 0) {
@@ -45,14 +46,13 @@ const App = () => {
           console.log("Generated rules array:", rulesArray);
 
           setBlockData(data);
-          setSettings((prev) => ({
-            ...prev,
+          updateSettings({
             nonce,
             colors,
             rules,
             rulesArray,
             isReady: true, // Mark as ready
-          }));
+          });
         }
       }
     };
@@ -60,6 +60,7 @@ const App = () => {
     fetchAndSetBlockData();
   }, [blockNumber]);
 
+  // Debugging log for when settings are ready
   useEffect(() => {
     if (settings.isReady) {
       console.log("Settings are ready:", settings);
@@ -72,16 +73,15 @@ const App = () => {
       console.log("Updating interaction rules...");
       const rules = generateRules(settings.colors, settings.nonce); // Generate rules
       const rulesArray = flattenRules(rules, settings.colors); // Flatten rules
-  
+
       console.log("Generated rules:", rules);
       console.log("Flattened rules array:", rulesArray);
-  
-      setSettings((prev) => ({
-        ...prev,
+
+      updateSettings({
         rules,
         rulesArray,
         isReady: true, // Mark as ready here
-      }));
+      });
     }
   }, [settings.colors, settings.nonce]);
 
@@ -97,8 +97,11 @@ const App = () => {
       />
 
       {/* Three.js Scene */}
-      <ThreeScene settings={settings} blockNumber={blockNumber} />
-
+      <ThreeScene
+        settings={settings}
+        blockNumber={blockNumber}
+        updateSettings={updateSettings}
+      />
 
       {/* Settings GUI */}
       <SettingsGUI settings={settings} updateSettings={updateSettings} />
