@@ -1,24 +1,33 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useRef } from "react";
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls";
 
-const ThreeScene = () => {
+const ThreeScene = ({ settings, blockData }) => {
   const containerRef = useRef(null);
   const sceneRef = useRef(null);
   const cameraRef = useRef(null);
   const rendererRef = useRef(null);
-  const particlesVelocityRef = useRef([]); // Stores velocities for particles
 
-  const [settings, setSettings] = useState({
-    numParticles: 500,
-    dimensions: 100,
-    speed: 2,
-    viscosity: 0.95,
-    trailLength: 2,
-    colors: [0xff0000, 0x00ff00, 0x0000ff], // Red, green, blue
-  });
+  // Atoms structure: [x, y, z, vx, vy, vz, colorIndex, mesh]
+  const atomsRef = useRef([]);
+  const timeRef = useRef(0);
 
-  // Initialize the scene
+  useEffect(() => {
+    initializeScene();
+    return () => {
+      if (rendererRef.current) {
+        rendererRef.current.dispose();
+      }
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Re-generate atoms whenever relevant settings change
+  useEffect(() => {
+    createAtoms();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [settings.colors, settings.atomsPerColor, settings.dimensions, settings.rulesArray, settings.nonce]);
+
   const initializeScene = () => {
     const container = containerRef.current;
     if (!container) return;
@@ -27,212 +36,207 @@ const ThreeScene = () => {
     scene.background = new THREE.Color(0x000000);
     sceneRef.current = scene;
 
-    const camera = new THREE.PerspectiveCamera(
-      75,
-      container.clientWidth / container.clientHeight,
-      0.1,
-      1000
+    const aspect = container.clientWidth / container.clientHeight;
+    const camera = new THREE.PerspectiveCamera(45, aspect, 0.1, 5000);
+    camera.position.set(settings.dimensions * 2, settings.dimensions * 2, settings.dimensions * 2);
+    camera.lookAt(
+      new THREE.Vector3(
+        settings.dimensions / 2,
+        settings.dimensions / 2,
+        settings.dimensions / 2
+      )
     );
-    camera.position.set(0, 120, 150);
-    camera.lookAt(0, 0, 0);
     cameraRef.current = camera;
 
     const renderer = new THREE.WebGLRenderer({ antialias: true });
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    renderer.setPixelRatio(window.devicePixelRatio);
     renderer.setSize(container.clientWidth, container.clientHeight);
     container.appendChild(renderer.domElement);
     rendererRef.current = renderer;
 
     const controls = new OrbitControls(camera, renderer.domElement);
-    controls.enableDamping = true;
-    controls.dampingFactor = 0.1;
+    controls.target.set(
+      settings.dimensions / 2,
+      settings.dimensions / 2,
+      settings.dimensions / 2
+    );
     controls.update();
 
-    const ambientLight = new THREE.AmbientLight(0xffffff, 0.3);
+    // Optional Grid Helper
+    const gridHelper = new THREE.GridHelper(settings.dimensions, 10);
+    gridHelper.position.set(settings.dimensions / 2, 0, settings.dimensions / 2);
+    scene.add(gridHelper);
+
+    // Lights
+    const ambientLight = new THREE.AmbientLight(0x404040);
     scene.add(ambientLight);
 
-    const pointLight = new THREE.PointLight(0xffffff, 1);
-    pointLight.position.set(50, 50, 50);
-    scene.add(pointLight);
+    const directionalLight = new THREE.DirectionalLight(0xffffff, 1);
+    directionalLight.position.set(1, 1, 1).normalize();
+    scene.add(directionalLight);
 
-    const cubeGeometry = new THREE.BoxGeometry(
-      settings.dimensions,
-      settings.dimensions,
-      settings.dimensions
-    );
-    const edges = new THREE.EdgesGeometry(cubeGeometry);
-    const edgesMaterial = new THREE.LineBasicMaterial({ color: 0x00ffff });
-    const cubeOutline = new THREE.LineSegments(edges, edgesMaterial);
-    scene.add(cubeOutline);
-  };
+    // Group to hold the atoms
+    const atomsGroup = new THREE.Group();
+    atomsGroup.name = "atomsGroup";
+    scene.add(atomsGroup);
 
-  // Initialize particles using InstancedMesh
-  const initializeParticles = () => {
-    const { numParticles, dimensions, colors } = settings;
-
-    // Remove old particle system
-    const oldParticles = sceneRef.current.getObjectByName("particleMesh");
-    if (oldParticles) sceneRef.current.remove(oldParticles);
-
-    // Create shared geometry and material
-    const geometry = new THREE.SphereGeometry(0.5, 16, 16);
-    const material = new THREE.MeshBasicMaterial({
-      color: 0xffffff,
-      transparent: true,
-      opacity: 0.8,
-      blending: THREE.AdditiveBlending,
-    });
-
-    const particleMesh = new THREE.InstancedMesh(geometry, material, numParticles);
-    particleMesh.name = "particleMesh";
-
-    const dummyObject = new THREE.Object3D();
-    const velocities = [];
-
-    for (let i = 0; i < numParticles; i++) {
-      // Random initial position
-      const x = Math.random() * dimensions - dimensions / 2;
-      const y = Math.random() * dimensions - dimensions / 2;
-      const z = Math.random() * dimensions - dimensions / 2;
-
-      dummyObject.position.set(x, y, z);
-      dummyObject.updateMatrix();
-      particleMesh.setMatrixAt(i, dummyObject.matrix);
-
-      // Assign random velocities
-      velocities.push(
-        new THREE.Vector3(
-          (Math.random() - 0.5) * settings.speed,
-          (Math.random() - 0.5) * settings.speed,
-          (Math.random() - 0.5) * settings.speed
-        )
-      );
-    }
-
-    particleMesh.instanceMatrix.needsUpdate = true;
-    sceneRef.current.add(particleMesh);
-    particlesVelocityRef.current = velocities; // Save velocities
-  };
-
-  // Animate particles
-  const animateParticles = () => {
-    const { dimensions, viscosity } = settings;
-    const particleMesh = sceneRef.current.getObjectByName("particleMesh");
-  
-    if (!particleMesh) return;
-  
-    const dummyObject = new THREE.Object3D(); // Helper object
-    const velocities = particlesVelocityRef.current; // Particle velocities
-  
-    for (let i = 0; i < settings.numParticles; i++) {
-      const velocity = velocities[i];
-  
-      // Retrieve the particle's current matrix
-      particleMesh.getMatrixAt(i, dummyObject.matrix);
-      dummyObject.matrix.decompose(dummyObject.position, dummyObject.quaternion, dummyObject.scale);
-  
-      // Update position using velocity
-      dummyObject.position.add(velocity);
-  
-      // Bounce off walls and apply viscosity
-      ["x", "y", "z"].forEach((axis) => {
-        if (
-          dummyObject.position[axis] > dimensions / 2 ||
-          dummyObject.position[axis] < -dimensions / 2
-        ) {
-          velocity[axis] = -velocity[axis]; // Reverse direction
-        }
-        velocity[axis] *= viscosity; // Apply viscosity damping
-      });
-  
-      // Update matrix with new position
-      dummyObject.updateMatrix();
-      particleMesh.setMatrixAt(i, dummyObject.matrix);
-    }
-  
-    // Notify Three.js to update the instance matrix
-    particleMesh.instanceMatrix.needsUpdate = true;
-  };
-  
-
-  // Adaptive animation loop
-  let frameCount = 0;
-  const animate = () => {
-    const start = performance.now();
-
-    if (frameCount % 2 === 0) {
-      animateParticles();
-      rendererRef.current.render(sceneRef.current, cameraRef.current);
-    }
-
-    frameCount++;
-    const end = performance.now();
-
-    if (end - start > 16) {
-      console.warn(`[Performance Warning] Frame time: ${end - start}ms`);
-    }
-
-    requestAnimationFrame(animate);
-  };
-
-  useEffect(() => {
-    initializeScene();
-    initializeParticles();
     animate();
+  };
 
-    return () => {
-      if (rendererRef.current) rendererRef.current.dispose();
-    };
-  }, []);
+  const createAtoms = () => {
+    const scene = sceneRef.current;
+    if (!scene) return;
 
-  useEffect(() => {
-    initializeParticles();
-  }, [settings]);
+    // Clear old atoms
+    const oldGroup = scene.getObjectByName("atomsGroup");
+    if (oldGroup) {
+      while (oldGroup.children.length) {
+        oldGroup.remove(oldGroup.children[0]);
+      }
+    }
+
+    const atomsGroup = oldGroup || new THREE.Group();
+    atomsGroup.name = "atomsGroup";
+
+    // Create a basic geometry and material for each color
+    const radius = 1; 
+    const geometry = new THREE.SphereGeometry(radius, 16, 16);
+    const materials = settings.colors.map((c) => new THREE.MeshBasicMaterial({ color: new THREE.Color(c) }));
+
+    // Distribute atoms among colors
+    // settings.atomsPerColor is how many atoms per color
+    const newAtoms = [];
+    for (let cIndex = 0; cIndex < settings.colors.length; cIndex++) {
+      for (let i = 0; i < settings.atomsPerColor; i++) {
+        const mesh = new THREE.Mesh(geometry, materials[cIndex]);
+        const x = Math.random() * settings.dimensions;
+        const y = Math.random() * settings.dimensions;
+        const z = Math.random() * settings.dimensions;
+        mesh.position.set(x, y, z);
+        atomsGroup.add(mesh);
+        newAtoms.push([x, y, z, 0, 0, 0, cIndex, mesh]);
+      }
+    }
+
+    scene.add(atomsGroup);
+    atomsRef.current = newAtoms;
+  };
+
+  const applyRules = () => {
+    const aData = atomsRef.current;
+    const {
+      timeScale,
+      viscosity,
+      cutOff,
+      collisionRadius,
+      oscillationAmplitude,
+      oscillationFrequency,
+      rulesArray,
+      dimensions
+    } = settings;
+
+    let total_v = 0.0;
+    const r2 = cutOff * cutOff;
+    const collisionR2 = collisionRadius * collisionRadius;
+    const polarityFactor = 1.0; // Adjust if needed
+
+    for (let i = 0; i < aData.length; i++) {
+      let fx = 0, fy = 0, fz = 0;
+      const a = aData[i];
+      for (let j = 0; j < aData.length; j++) {
+        if (i === j) continue;
+        const b = aData[j];
+        let g = rulesArray[a[6]][b[6]];
+        // Add oscillation as in original
+        g += oscillationAmplitude * Math.sin(timeRef.current * oscillationFrequency);
+        g *= polarityFactor;
+
+        const dx = a[0] - b[0];
+        const dy = a[1] - b[1];
+        const dz = a[2] - b[2];
+        const d = dx * dx + dy * dy + dz * dz;
+        if (d < r2 && d > 0) {
+          const dist = Math.sqrt(d);
+          const F = g / dist;
+          fx += F * dx;
+          fy += F * dy;
+          fz += F * dz;
+
+          // Collision handling
+          if (d < collisionR2) {
+            const overlap = collisionRadius - dist;
+            fx += (overlap * dx) / dist;
+            fy += (overlap * dy) / dist;
+            fz += (overlap * dz) / dist;
+          }
+        }
+      }
+
+      // Apply viscosity and time scale
+      const vmix = 1.0 - viscosity;
+      a[3] = a[3] * vmix + fx * timeScale;
+      a[4] = a[4] * vmix + fy * timeScale;
+      a[5] = a[5] * vmix + fz * timeScale;
+      total_v += Math.abs(a[3]) + Math.abs(a[4]) + Math.abs(a[5]);
+    }
+
+    // Update positions and boundary checks
+    for (let i = 0; i < aData.length; i++) {
+      const a = aData[i];
+      a[0] += a[3];
+      a[1] += a[4];
+      a[2] += a[5];
+
+      if (a[0] < 0) {
+        a[0] = -a[0];
+        a[3] *= -1;
+      }
+      if (a[0] >= dimensions) {
+        a[0] = 2 * dimensions - a[0];
+        a[3] *= -1;
+      }
+
+      if (a[1] < 0) {
+        a[1] = -a[1];
+        a[4] *= -1;
+      }
+      if (a[1] >= dimensions) {
+        a[1] = 2 * dimensions - a[1];
+        a[4] *= -1;
+      }
+
+      if (a[2] < 0) {
+        a[2] = -a[2];
+        a[5] *= -1;
+      }
+      if (a[2] >= dimensions) {
+        a[2] = 2 * dimensions - a[2];
+        a[5] *= -1;
+      }
+
+      a[7].position.set(a[0], a[1], a[2]);
+    }
+
+    timeRef.current += 1;
+  };
+
+  const animate = () => {
+    requestAnimationFrame(animate);
+    applyRules();
+
+    const scene = sceneRef.current;
+    const camera = cameraRef.current;
+    const renderer = rendererRef.current;
+    if (scene && camera && renderer) {
+      renderer.render(scene, camera);
+    }
+  };
 
   return (
     <div style={{ display: "flex", height: "100vh" }}>
       <div ref={containerRef} style={{ flex: 1 }} />
-      <div style={{ width: "300px", padding: "10px", background: "#222", color: "#fff" }}>
-        <h3>Settings</h3>
-        <label>
-          Particle Count:
-          <input
-            type="number"
-            value={settings.numParticles}
-            onChange={(e) =>
-              setSettings({ ...settings, numParticles: parseInt(e.target.value, 10) })
-            }
-          />
-        </label>
-        <br />
-        <label>
-          Dimensions:
-          <input
-            type="number"
-            value={settings.dimensions}
-            onChange={(e) =>
-              setSettings({ ...settings, dimensions: parseInt(e.target.value, 10) })
-            }
-          />
-        </label>
-        <br />
-        <label>
-          Speed:
-          <input
-            type="range"
-            min="0.1"
-            max="5"
-            step="0.1"
-            value={settings.speed}
-            onChange={(e) =>
-              setSettings({ ...settings, speed: parseFloat(e.target.value) })
-            }
-          />
-        </label>
-      </div>
     </div>
   );
 };
 
 export default ThreeScene;
-
