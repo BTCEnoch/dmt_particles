@@ -1,24 +1,38 @@
-class ErrorBoundary extends React.Component {
-    constructor(props) {
-      super(props);
-      this.state = { hasError: false };
-    }
-  
-    static getDerivedStateFromError(error) {
-      return { hasError: true };
-    }
-  
-    componentDidCatch(error, errorInfo) {
-      console.error('Error occurred:', error, errorInfo);
-    }
-  
-    render() {
-      if (this.state.hasError) {
-        return <h1>Something went wrong. Please refresh the page.</h1>;
-      }
-  
-      return this.props.children;
-    }
+import React, { Component } from 'react';
+import PropTypes from 'prop-types';
+
+class ErrorBoundary extends Component {
+  constructor(props) {
+    super(props);
+    this.state = { hasError: false, error: null };
   }
   
-  export default ErrorBoundary;
+  static getDerivedStateFromError(error) {
+    return { hasError: true, error };
+  }
+  
+  componentDidCatch(error, errorInfo) {
+    console.error('Error:', error);
+    console.error('Error Info:', errorInfo);
+  }
+  
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="error-boundary">
+          <h2>Something went wrong.</h2>
+          <p>{this.state.error?.message}</p>
+          <button onClick={() => window.location.reload()}>
+            Reload Page
+          </button>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+ErrorBoundary.propTypes = {
+  children: PropTypes.node.isRequired
+};
+
+export default ErrorBoundary;

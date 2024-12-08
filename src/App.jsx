@@ -3,10 +3,12 @@ import { fetchBlockData } from "./services/blockDataService";
 import { generateColorsFromNonce, generateRules, flattenRules } from "./utils/rulesUtils";
 import ThreeScene from "./components/ThreeScene";
 import SettingsGUI from "./components/SettingsGUI";
+import ErrorBoundary from './components/ErrorBoundary';
+import './App.css';
 
-const App = () => {
-  const [blockNumber, setBlockNumber] = useState(0); // User-input block number
-  const [blockData, setBlockData] = useState(null); // Fetched block data
+function App() {
+  const [blockNumber, setBlockNumber] = useState(0);
+  const [blockData, setBlockData] = useState(null);
   const [settings, setSettings] = useState({
     dimensions: 800,
     atomsPerColor: 250,
@@ -17,29 +19,27 @@ const App = () => {
     oscillationFrequency: 0.01,
     cutOff: 18100,
     pulseDuration: 100,
-    colors: ["#ff0000", "#00ff00", "#0000ff"], // Default colors
+    colors: ["#ff0000", "#00ff00", "#0000ff"],
     rules: {},
     rulesArray: [],
-    isReady: false, // Indicates if the app is ready for animation
+    isReady: false
   });
 
-  // Function to update settings
   const updateSettings = (newSettings) => {
     setSettings((prev) => ({ ...prev, ...newSettings }));
   };
 
-  // Fetch block data and update settings when blockNumber changes
   useEffect(() => {
-    const fetchAndSetBlockData = async () => {
+    const fetchAndUpdateBlockData = async () => {
       if (blockNumber > 0) {
         console.log(`Fetching block data for block number: ${blockNumber}`);
         const data = await fetchBlockData(blockNumber);
 
         if (data) {
-          const nonce = data.nonce || 0; // Get nonce from block data
-          const colors = generateColorsFromNonce(nonce, 3); // Generate 3 colors based on nonce
-          const rules = generateRules(colors, nonce); // Generate interaction rules
-          const rulesArray = flattenRules(rules, colors); // Flatten rules into 2D array
+          const nonce = data.nonce || 0;
+          const colors = generateColorsFromNonce(nonce, 3);
+          const rules = generateRules(colors, nonce);
+          const rulesArray = flattenRules(rules, colors);
 
           console.log("Fetched block data:", data);
           console.log("Generated colors:", colors);
@@ -51,62 +51,57 @@ const App = () => {
             colors,
             rules,
             rulesArray,
-            isReady: true, // Mark as ready
+            isReady: true
           });
         }
+      } else {
+        console.warn("Block number is not greater than 0. Skipping data fetch.");
       }
     };
 
-    fetchAndSetBlockData();
+    fetchAndUpdateBlockData();
   }, [blockNumber]);
 
-  // Debugging log for when settings are ready
   useEffect(() => {
     if (settings.isReady) {
       console.log("Settings are ready:", settings);
     }
   }, [settings.isReady]);
 
-  // Ensure rules are updated when colors or nonce change
   useEffect(() => {
-    if (settings.colors.length > 0 && settings.nonce !== undefined) {
-      console.log("Updating interaction rules...");
-      const rules = generateRules(settings.colors, settings.nonce); // Generate rules
-      const rulesArray = flattenRules(rules, settings.colors); // Flatten rules
-
-      console.log("Generated rules:", rules);
-      console.log("Flattened rules array:", rulesArray);
-
-      updateSettings({
-        rules,
-        rulesArray,
-        isReady: true, // Mark as ready here
-      });
-    }
-  }, [settings.colors, settings.nonce]);
+    console.log("Updated settings:", settings);
+  }, [settings]);
 
   return (
-    <>
-      {/* Block number input */}
+    <div className="App">
       <input
         type="number"
         value={blockNumber}
         onChange={(e) => setBlockNumber(parseInt(e.target.value, 10) || 0)}
         placeholder="Enter block number"
-        style={{ position: "absolute", top: "10px", left: "10px", zIndex: 100 }}
+        style={{
+          position: "absolute",
+          top: "10px",
+          left: "10px",
+          zIndex: 100,
+        }}
       />
+      
+      <ErrorBoundary>
+        <ThreeScene 
+          settings={settings}
+          blockNumber={blockNumber}
+          setBlockNumber={setBlockNumber}
+          updateSettings={updateSettings}
+        />
+      </ErrorBoundary>
 
-      {/* Three.js Scene */}
-      <ThreeScene
-        settings={settings}
-        blockNumber={blockNumber}
+      <SettingsGUI 
+        settings={settings} 
         updateSettings={updateSettings}
       />
-
-      {/* Settings GUI */}
-      <SettingsGUI settings={settings} updateSettings={updateSettings} />
-    </>
+    </div>
   );
-};
+}
 
 export default App;
